@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Monitoramento de Semáforos</title>
+    <script src="https://cdn.jsdelivr.net/npm/mqtt/dist/mqtt.min.js"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            background-color: #f0f0f0;
+            min-height: 100vh;
+            margin: 0;
+            padding: 20px;
+        }
+
+        .traffic-lights-container {
+            display: flex;
+            gap: 50px;
+            margin-top: 20px;
+        }
+
+        .traffic-light {
+            background-color: #333;
+            padding: 10px;
+            border-radius: 10px;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            box-shadow: 0 4px 8px rgba(0,0,0,0.2);
+        }
+
+        .light {
+            width: 80px;
+            height: 80px;
+            border-radius: 50%;
+            border: 3px solid #222;
+        }
+
+        .red {
+            background-color: #661414;
+        }
+
+        .yellow {
+            background-color: #666014;
+        }
+
+        .green {
+            background-color: #145214;
+        }
+
+        .active-red {
+            background-color: #ff0000;
+            box-shadow: 0 0 20px #ff0000;
+        }
+
+        .active-yellow {
+            background-color: #ffff00;
+            box-shadow: 0 0 20px #ffff00;
+        }
+
+        .active-green {
+            background-color: #00ff00;
+            box-shadow: 0 0 20px #00ff00;
+        }
+
+        .traffic-light-label {
+            text-align: center;
+            color: white;
+            font-weight: bold;
+            margin-bottom: 5px;
+        }
+
+        .status {
+            margin-top: 20px;
+            padding: 10px;
+            border-radius: 5px;
+            background-color: #fff;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+
+        .night-mode-btn {
+            margin-top: 20px;
+            padding: 10px 20px;
+            font-size: 16px;
+            background-color: #2c3e50;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            transition: background-color 0.3s;
+        }
+
+        .night-mode-btn.active {
+            background-color: #f39c12;
+        }
+
+        .night-mode-btn:hover {
+            background-color: #34495e;
+        }
+    </style>
+</head>
+<body>
+    <h1>Monitoramento de Semáforos</h1>
+    
+    <div class="traffic-lights-container">
+        <div class="traffic-light">
+            <div class="traffic-light-label">Semáforo 1</div>
+            <div class="light red" id="red1"></div>
+            <div class="light yellow" id="yellow1"></div>
+            <div class="light green" id="green1"></div>
+        </div>
+
+        <div class="traffic-light">
+            <div class="traffic-light-label">Semáforo 2</div>
+            <div class="light red" id="red2"></div>
+            <div class="light yellow" id="yellow2"></div>
+            <div class="light green" id="green2"></div>
+        </div>
+    </div>
+
+    <button id="nightModeBtn" class="night-mode-btn">Modo Noturno</button>
+    <div class="status" id="status">Status: Conectando ao servidor MQTT...</div>
+
+    <script>
+        // Configurações MQTT atualizadas
+        const options = {
+            hostname: 'c4bd3577289c4b58a61f581b8260c62c.s1.eu.hivemq.cloud',
+            port: 8884,
+            protocol: 'wss',
+            username: 'jonathan',
+            password: 'Galo@2267'
+        };
+
+        // Estado inicial dos semáforos
+        let semaforo1State = 'RED';
+        let semaforo2State = 'RED';
+        let isNightMode = false;
+        let nightModeInterval;
+
+        // Função para atualizar as luzes do semáforo 1
+        function updateSemaforo1(state) {
+            document.getElementById('red1').className = 'light red' + (state === 'RED' ? ' active-red' : '');
+            document.getElementById('yellow1').className = 'light yellow' + (state === 'YELLOW' ? ' active-yellow' : '');
+            document.getElementById('green1').className = 'light green' + (state === 'GREEN' ? ' active-green' : '');
+        }
+
+        // Função para atualizar as luzes do semáforo 2
+        function updateSemaforo2(state) {
+            document.getElementById('red2').className = 'light red' + (state === 'RED' ? ' active-red' : '');
+            document.getElementById('yellow2').className = 'light yellow' + (state === 'YELLOW' ? ' active-yellow' : '');
+            document.getElementById('green2').className = 'light green' + (state === 'GREEN' ? ' active-green' : '');
+        }
+
+        // Conectar ao broker MQTT com a nova configuração
+        const client = mqtt.connect(`wss://${options.hostname}:${options.port}/mqtt`, {
+            username: options.username,
+            password: options.password
+        });
+
+        client.on('connect', () => {
+            document.getElementById('status').textContent = 'Status: Conectado ao servidor MQTT';
+            client.subscribe('traffic_light_sync');
+            client.subscribe('night_mode');
+        });
+
+        client.on('message', (topic, message) => {
+            if (topic === 'night_mode') {
+                const nightMode = message.toString() === 'ON';
+                handleNightMode(nightMode);
+                return;
+            }
+
+            if (!isNightMode) {
+                const state = message.toString();
+                
+                // Atualiza o estado do semáforo 1 (master)
+                semaforo1State = state;
+                updateSemaforo1(semaforo1State);
+
+                // Atualiza o estado do semáforo 2 (slave) - lógica inversa
+                if (state === 'GREEN') {
+                    semaforo2State = 'RED';
+                } else if (state === 'RED') {
+                    semaforo2State = 'GREEN';
+                } else if (state === 'YELLOW') {
+                    semaforo2State = 'YELLOW';
+                }
+                updateSemaforo2(semaforo2State);
+            }
+        });
+
+        client.on('error', (error) => {
+            document.getElementById('status').textContent = 'Status: Erro na conexão MQTT - ' + error.message;
+        });
+
+        // Função para lidar com o modo noturno
+        function handleNightMode(enabled) {
+            isNightMode = enabled;
+            const nightModeBtn = document.getElementById('nightModeBtn');
+            
+            if (enabled) {
+                nightModeBtn.classList.add('active');
+                // Inicia o piscar amarelo
+                let isYellow = true;
+                nightModeInterval = setInterval(() => {
+                    if (isYellow) {
+                        updateSemaforo1('YELLOW');
+                        updateSemaforo2('YELLOW');
+                    } else {
+                        updateSemaforo1('OFF');
+                        updateSemaforo2('OFF');
+                    }
+                    isYellow = !isYellow;
+                }, 1000); // Alterna a cada 1 segundo
+            } else {
+                nightModeBtn.classList.remove('active');
+                clearInterval(nightModeInterval);
+                // Retorna ao estado normal
+                updateSemaforo1('RED');
+                updateSemaforo2('RED');
+            }
+        }
+
+        // Configuração do botão de modo noturno
+        const nightModeBtn = document.getElementById('nightModeBtn');
+        nightModeBtn.addEventListener('click', () => {
+            const newNightModeState = !isNightMode;
+            client.publish('night_mode', newNightModeState ? 'ON' : 'OFF');
+        });
+
+        // Inicialização dos semáforos
+        updateSemaforo1('RED');
+        updateSemaforo2('RED');
+    </script>
+</body>
+</html>
